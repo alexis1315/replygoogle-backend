@@ -22,19 +22,18 @@ app.post('/generate', async (req, res) => {
     return res.status(400).json({ error: 'Paramètres manquants' });
   }
 
-  const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
-
+const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
 Regles STRICTES :
 - Maximum 2 phrases courtes
 - Ton naturel et humain
 - Zero emoji, zero markdown, zero gras
 - Pas de superlatifs exageres
-- Avis positif : remercier simplement, inviter a revenir
-- Avis negatif : s'excuser brievement, proposer d'en discuter en prive
+- Avis positif : remercier simplement, mentionner un detail de l'avis, terminer par le nom
+- Avis negatif : reconnaitre le probleme specifique, dire qu'on prend note et qu'on va s'ameliorer, NE PAS proposer de discussion privee, NE PAS inviter a rappeler ou recontacter, terminer par le nom
+- INTERDIT : "n'hesitez pas a nous contacter", "discutons en prive", "appelez-nous", "revenez nous voir pour qu'on arrange ca"
+- La reponse doit etre complete et fermee, elle ne doit rien promettre qui necessite une action supplementaire
 - Terminer par le nom de l'etablissement en texte simple
-
 Avis : "${review}"
-
 Reponds uniquement avec la reponse en texte brut.`;
 
   try {
