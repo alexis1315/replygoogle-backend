@@ -49,7 +49,7 @@ Reponds uniquement avec la reponse en texte brut.`;
       return res.status(500).json({ error: data.error.message });
     }
     const text = data.content.map(i => i.text || '').join('');
-    res.json({ response: text });
+    const explanation = data.content.map(i => i.text || '').join(''); // On demande une explication séparée si des instructions custom ont été données const explanation = data.content.map(i => i.text || '').join(''); // On demande une explication séparée si des instructions custom ont été données res.json({ response: text });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
