@@ -16,8 +16,8 @@ app.post('/generate', async (req, res) => {
   if (!review || !businessName) {
     return res.status(400).json({ error: 'Paramètres manquants' });
   }
-const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
-${customInstructions ? `INSTRUCTIONS PRIORITAIRES DU PROPRIETAIRE (a respecter absolument) : ${customInstructions}` : ''}
+  const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
+${customInstructions ? `INSTRUCTIONS PRIORITAIRES DU PROPRIETAIRE (a respecter absolument si raisonnable) : ${customInstructions}` : ''}
 Regles de base (sauf si les instructions du proprietaire disent autrement) :
 - Maximum 2 phrases courtes
 - Ton naturel et humain
@@ -29,7 +29,9 @@ Regles de base (sauf si les instructions du proprietaire disent autrement) :
 - La reponse ne doit rien promettre qui necessite une action du proprietaire
 - Terminer par le nom de l'etablissement en texte simple
 Avis : "${review}"
-Reponds uniquement avec la reponse en texte brut.`;
+Reponds avec un JSON valide uniquement, sans backticks, sans markdown, avec ce format exact :
+{"response":"la reponse ici","explanation":"${customInstructions ? 'explication courte en francais de comment tu as applique ou adapte les instructions' : ''}"}`;
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -40,7 +42,7 @@ Reponds uniquement avec la reponse en texte brut.`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
+        max_tokens: 400,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -48,8 +50,13 @@ Reponds uniquement avec la reponse en texte brut.`;
     if (data.error) {
       return res.status(500).json({ error: data.error.message });
     }
-    const text = data.content.map(i => i.text || '').join('');
-    const explanation = data.content.map(i => i.text || '').join(''); // On demande une explication séparée si des instructions custom ont été données const explanation = data.content.map(i => i.text || '').join(''); // On demande une explication séparée si des instructions custom ont été données res.json({ response: text });
+    const raw = data.content.map(i => i.text || '').join('');
+    try {
+      const parsed = JSON.parse(raw);
+      res.json({ response: parsed.response, explanation: parsed.explanation });
+    } catch {
+      res.json({ response: raw, explanation: '' });
+    }
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur' });
   }
