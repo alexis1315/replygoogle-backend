@@ -34,6 +34,7 @@ Regles STRICTES :
 - La reponse doit etre complete et fermee, elle ne doit rien promettre qui necessite une action supplementaire
 - Terminer par le nom de l'etablissement en texte simple
 Avis : "${review}"
+${customInstructions ? `Instructions supplementaires du proprietaire : ${customInstructions}` : ''}
 Reponds uniquement avec la reponse en texte brut.`;
 
   try {
