@@ -16,7 +16,7 @@ app.get('/', (req, res) => {
 });
 
 app.post('/generate', async (req, res) => {
-  const { review, businessName, businessType, stars, tone } = req.body;
+  const { review, businessName, businessType, stars, tone, customInstructions } = req.body;
 
   if (!review || !businessName) {
     return res.status(400).json({ error: 'Paramètres manquants' });
