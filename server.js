@@ -4,20 +4,28 @@ const fetch = require('node-fetch');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
 app.use(cors({
   origin: ['https://reponse-avis-google.vercel.app', 'http://localhost:3000']
 }));
 app.use(express.json());
+
 app.get('/', (req, res) => {
   res.json({ status: 'ReplyGoogle API en ligne ✅' });
 });
+
 app.post('/generate', async (req, res) => {
-  const { review, businessName, businessType, stars, tone, customInstructions } = req.body;
+  const { review, businessName, businessType, stars, tone, customInstructions, language } = req.body;
+
   if (!review || !businessName) {
     return res.status(400).json({ error: 'Paramètres manquants' });
   }
+
+  const lang = language || 'Français';
+
   const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
 ${customInstructions ? `INSTRUCTIONS PRIORITAIRES DU PROPRIETAIRE (a respecter absolument si raisonnable) : ${customInstructions}` : ''}
+LANGUE DE LA REPONSE : Tu dois repondre UNIQUEMENT en ${lang}. Peu importe la langue de l'avis, ta reponse doit etre en ${lang}.
 Regles de base (sauf si les instructions du proprietaire disent autrement) :
 - Maximum 2 phrases courtes
 - Ton naturel et humain
@@ -46,10 +54,12 @@ Reponds avec un JSON valide uniquement, sans backticks, sans markdown, avec ce f
         messages: [{ role: 'user', content: prompt }]
       })
     });
+
     const data = await response.json();
     if (data.error) {
       return res.status(500).json({ error: data.error.message });
     }
+
     const raw = data.content.map(i => i.text || '').join('');
     try {
       const parsed = JSON.parse(raw);
@@ -61,6 +71,7 @@ Reponds avec un JSON valide uniquement, sans backticks, sans markdown, avec ce f
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
 app.listen(PORT, () => {
   console.log(`ReplyGoogle API démarrée sur le port ${PORT}`);
 });
