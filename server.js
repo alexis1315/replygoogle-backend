@@ -4,61 +4,14 @@ const fetch = require('node-fetch');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
-const SUPABASE_URL = 'https://xurpvafngahgasehpnmm.supabase.co';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 app.use(cors({
   origin: ['https://reponse-avis-google.vercel.app', 'http://localhost:3000']
 }));
-
-// IMPORTANT: raw body pour Stripe webhook
-app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({ status: 'ReplyGoogle API en ligne ✅' });
-});
-
-// STRIPE WEBHOOK
-app.post('/webhook', async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.log('Webhook signature error:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  const subscription = event.data.object;
-  const customerId = subscription.customer;
-  const status = subscription.status;
-
-  const priceId = subscription.items?.data[0]?.price?.id;
-  let plan = 'free';
-  if (status === 'active') {
-    if (priceId === 'price_starter') plan = 'starter';
-    else if (priceId === 'price_pro') plan = 'pro';
-    else if (priceId === 'price_agence') plan = 'agence';
-    else plan = 'starter';
-  }
-
-  if (event.type === 'customer.subscription.deleted') plan = 'free';
-
-  await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?stripe_customer_id=eq.${customerId}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
-    },
-    body: JSON.stringify({ plan, plan_updated_at: new Date().toISOString() })
-  });
-
-  res.json({ received: true });
 });
 
 app.post('/generate', async (req, res) => {
@@ -103,7 +56,9 @@ Reponds avec un JSON valide uniquement, sans backticks, sans markdown, avec ce f
     });
 
     const data = await response.json();
-    if (data.error) return res.status(500).json({ error: data.error.message });
+    if (data.error) {
+      return res.status(500).json({ error: data.error.message });
+    }
 
     const raw = data.content.map(i => i.text || '').join('');
     try {
