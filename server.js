@@ -37,19 +37,17 @@ app.post('/webhook', async (req, res) => {
   const customerId = subscription.customer;
   const status = subscription.status;
 
-  // Déterminer le plan selon le price ID
   const priceId = subscription.items?.data[0]?.price?.id;
   let plan = 'free';
   if (status === 'active') {
     if (priceId === 'price_starter') plan = 'starter';
     else if (priceId === 'price_pro') plan = 'pro';
     else if (priceId === 'price_agence') plan = 'agence';
-    else plan = 'starter'; // fallback
+    else plan = 'starter';
   }
 
   if (event.type === 'customer.subscription.deleted') plan = 'free';
 
-  // Mettre à jour Supabase
   await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?stripe_customer_id=eq.${customerId}`, {
     method: 'PATCH',
     headers: {
