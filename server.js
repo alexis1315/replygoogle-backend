@@ -40,39 +40,40 @@ app.post('/webhook', async (req, res) => {
     }
     if (event.type === 'customer.subscription.deleted') plan = 'free';
 
-    // Récupérer l'email du customer depuis Stripe
-    const customer = await stripe.customers.retrieve(customerId);
-    const customerEmail = customer.email;
+    let userId = subscription.metadata?.supabase_user_id;
 
-    if (customerEmail) {
-      // Chercher l'utilisateur dans Supabase par email
-      const userRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(customerEmail)}`, {
-        headers: {
-          'apikey': SUPABASE_SERVICE_KEY,
-          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
-        }
-      });
-      const userData = await userRes.json();
-      const userId = userData?.users?.[0]?.id;
+    if (!userId) {
+      const customer = await stripe.customers.retrieve(customerId);
+      userId = customer.metadata?.supabase_user_id;
 
-      if (userId) {
-        // Upsert dans user_preferences
-        await fetch(`${SUPABASE_URL}/rest/v1/user_preferences`, {
-          method: 'POST',
+      if (!userId && customer.email) {
+        const userRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(customer.email)}`, {
           headers: {
-            'Content-Type': 'application/json',
             'apikey': SUPABASE_SERVICE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            'Prefer': 'resolution=merge-duplicates'
-          },
-          body: JSON.stringify({
-            user_id: userId,
-            stripe_customer_id: customerId,
-            plan,
-            plan_updated_at: new Date().toISOString()
-          })
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+          }
         });
+        const userData = await userRes.json();
+        userId = userData?.users?.[0]?.id;
       }
+    }
+
+    if (userId) {
+      await fetch(`${SUPABASE_URL}/rest/v1/user_preferences`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Prefer': 'resolution=merge-duplicates'
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          stripe_customer_id: customerId,
+          plan,
+          plan_updated_at: new Date().toISOString()
+        })
+      });
     }
 
   } catch (err) {
