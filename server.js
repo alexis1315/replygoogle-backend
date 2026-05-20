@@ -4,25 +4,64 @@ const fetch = require('node-fetch');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+const SUPABASE_URL = 'https://xurpvafngahgasehpnmm.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 app.use(cors({
   origin: ['https://reponse-avis-google.vercel.app', 'http://localhost:3000']
 }));
+
+app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({ status: 'ReplyGoogle API en ligne ✅' });
 });
 
+app.post('/webhook', async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.log('Webhook signature error:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  const subscription = event.data.object;
+  const customerId = subscription.customer;
+  const status = subscription.status;
+  const priceId = subscription.items?.data[0]?.price?.id;
+  let plan = 'free';
+  if (status === 'active') {
+    if (priceId === 'price_1TWzT49WVy70N8CXKhHkssA3') plan = 'starter';
+    else if (priceId === 'price_1TY7hk9WVy70N8CX0G6XQKiX') plan = 'pro';
+    else if (priceId === 'price_1TY7iF9WVy70N8CXzWV8HDrW') plan = 'agence';
+    else plan = 'starter';
+  }
+  if (event.type === 'customer.subscription.deleted') plan = 'free';
+
+  await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?stripe_customer_id=eq.${customerId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+    },
+    body: JSON.stringify({ plan, plan_updated_at: new Date().toISOString() })
+  });
+
+  res.json({ received: true });
+});
+
 app.post('/generate', async (req, res) => {
   const { review, businessName, businessType, stars, tone, customInstructions, language } = req.body;
-
   if (!review || !businessName) {
     return res.status(400).json({ error: 'Paramètres manquants' });
   }
-
   const lang = language || 'Français';
-
   const prompt = `Tu es le gerant de "${businessName}", un(e) ${businessType || 'etablissement'}. Reponds a cet avis Google ${stars || 5} etoile(s) de facon ${tone || 'Chaleureux'}.
 ${customInstructions ? `INSTRUCTIONS PRIORITAIRES DU PROPRIETAIRE (a respecter absolument si raisonnable) : ${customInstructions}` : ''}
 LANGUE DE LA REPONSE : Tu dois repondre UNIQUEMENT en ${lang}. Peu importe la langue de l'avis, ta reponse doit etre en ${lang}.
@@ -54,12 +93,8 @@ Reponds avec un JSON valide uniquement, sans backticks, sans markdown, avec ce f
         messages: [{ role: 'user', content: prompt }]
       })
     });
-
     const data = await response.json();
-    if (data.error) {
-      return res.status(500).json({ error: data.error.message });
-    }
-
+    if (data.error) return res.status(500).json({ error: data.error.message });
     const raw = data.content.map(i => i.text || '').join('');
     try {
       const parsed = JSON.parse(raw);
