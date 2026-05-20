@@ -25,33 +25,60 @@ app.post('/webhook', async (req, res) => {
   try {
     const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
     event = stripe.webhooks.constructEvent(req.body, sig, STRIPE_WEBHOOK_SECRET);
+
+    const subscription = event.data.object;
+    const customerId = subscription.customer;
+    const status = subscription.status;
+    const priceId = subscription.items?.data[0]?.price?.id;
+
+    let plan = 'free';
+    if (status === 'active') {
+      if (priceId === 'price_1TWzT49WVy70N8CXKhHkssA3') plan = 'starter';
+      else if (priceId === 'price_1TY7hk9WVy70N8CX0G6XQKiX') plan = 'pro';
+      else if (priceId === 'price_1TY7iF9WVy70N8CXzWV8HDrW') plan = 'agence';
+      else plan = 'starter';
+    }
+    if (event.type === 'customer.subscription.deleted') plan = 'free';
+
+    // Récupérer l'email du customer depuis Stripe
+    const customer = await stripe.customers.retrieve(customerId);
+    const customerEmail = customer.email;
+
+    if (customerEmail) {
+      // Chercher l'utilisateur dans Supabase par email
+      const userRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(customerEmail)}`, {
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+        }
+      });
+      const userData = await userRes.json();
+      const userId = userData?.users?.[0]?.id;
+
+      if (userId) {
+        // Upsert dans user_preferences
+        await fetch(`${SUPABASE_URL}/rest/v1/user_preferences`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_SERVICE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify({
+            user_id: userId,
+            stripe_customer_id: customerId,
+            plan,
+            plan_updated_at: new Date().toISOString()
+          })
+        });
+      }
+    }
+
   } catch (err) {
-    console.log('Webhook signature error:', err.message);
+    console.log('Webhook error:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
-
-  const subscription = event.data.object;
-  const customerId = subscription.customer;
-  const status = subscription.status;
-  const priceId = subscription.items?.data[0]?.price?.id;
-  let plan = 'free';
-  if (status === 'active') {
-    if (priceId === 'price_1TWzT49WVy70N8CXKhHkssA3') plan = 'starter';
-    else if (priceId === 'price_1TY7hk9WVy70N8CX0G6XQKiX') plan = 'pro';
-    else if (priceId === 'price_1TY7iF9WVy70N8CXzWV8HDrW') plan = 'agence';
-    else plan = 'starter';
-  }
-  if (event.type === 'customer.subscription.deleted') plan = 'free';
-
-  await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?stripe_customer_id=eq.${customerId}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
-    },
-    body: JSON.stringify({ plan, plan_updated_at: new Date().toISOString() })
-  });
 
   res.json({ received: true });
 });
