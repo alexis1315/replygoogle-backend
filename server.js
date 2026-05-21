@@ -9,7 +9,7 @@ const SUPABASE_URL = 'https://xurpvafngahgasehpnmm.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 app.use(cors({
-  origin: ['https://reponse-avis-google.vercel.app', 'http://localhost:3000']
+  origin: ['https://replygoogle.fr', 'https://www.replygoogle.fr', 'https://reponse-avis-google.vercel.app', 'http://localhost:3000']
 }));
 
 app.use('/webhook', express.raw({ type: 'application/json' }));
