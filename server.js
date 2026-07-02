@@ -7,6 +7,9 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 const SUPABASE_URL = 'https://xurpvafngahgasehpnmm.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const REDIRECT_URI = 'https://replygoogle.fr/app.html';
 
 app.use(cors({
   origin: ['https://replygoogle.fr', 'https://www.replygoogle.fr', 'https://reponse-avis-google.vercel.app', 'http://localhost:3000']
@@ -19,6 +22,153 @@ app.get('/', (req, res) => {
   res.json({ status: 'ReplyGoogle API en ligne ✅' });
 });
 
+// ============ GOOGLE OAUTH ============
+
+// Étape 1 : Rediriger vers Google pour connexion
+app.get('/auth/google', (req, res) => {
+  const userId = req.query.userId;
+  const scopes = [
+    'https://www.googleapis.com/auth/business.manage'
+  ].join(' ');
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: scopes,
+    access_type: 'offline',
+    prompt: 'consent',
+    state: userId // On passe le userId pour le retrouver au callback
+  });
+
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+// Étape 2 : Callback Google → échanger le code contre un token
+app.post('/auth/google/callback', async (req, res) => {
+  const { code, userId } = req.body;
+  if (!code || !userId) return res.status(400).json({ error: 'Paramètres manquants' });
+
+  try {
+    // Échanger le code contre des tokens
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
+        grant_type: 'authorization_code'
+      })
+    });
+
+    const tokens = await tokenRes.json();
+    if (tokens.error) return res.status(400).json({ error: tokens.error_description });
+
+    // Sauvegarder les tokens dans Supabase
+    await fetch(`${SUPABASE_URL}/rest/v1/user_preferences`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        google_access_token: tokens.access_token,
+        google_refresh_token: tokens.refresh_token,
+        google_token_expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+      })
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de l\'échange du token' });
+  }
+});
+
+// Étape 3 : Récupérer les avis Google d'un établissement
+app.get('/google/reviews', async (req, res) => {
+  const { userId, locationId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId manquant' });
+
+  try {
+    // Récupérer le token depuis Supabase
+    const prefRes = await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?user_id=eq.${userId}&select=google_access_token,google_refresh_token,google_token_expires_at`, {
+      headers: {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+      }
+    });
+    const prefs = await prefRes.json();
+    if (!prefs[0]?.google_access_token) return res.status(401).json({ error: 'Compte Google non connecté' });
+
+    let accessToken = prefs[0].google_access_token;
+
+    // Rafraîchir le token si expiré
+    const expiresAt = new Date(prefs[0].google_token_expires_at);
+    if (expiresAt < new Date()) {
+      const refreshRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          refresh_token: prefs[0].google_refresh_token,
+          grant_type: 'refresh_token'
+        })
+      });
+      const refreshed = await refreshRes.json();
+      accessToken = refreshed.access_token;
+
+      // Mettre à jour le token dans Supabase
+      await fetch(`${SUPABASE_URL}/rest/v1/user_preferences?user_id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+        },
+        body: JSON.stringify({
+          google_access_token: accessToken,
+          google_token_expires_at: new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
+        })
+      });
+    }
+
+    // Récupérer les établissements Google Business
+    const accountsRes = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    const accounts = await accountsRes.json();
+    if (!accounts.accounts?.length) return res.json({ reviews: [], accounts: [] });
+
+    const accountName = accounts.accounts[0].name;
+
+    // Récupérer les établissements
+    const locationsRes = await fetch(`https://mybusinessbusinessinformation.googleapis.com/v1/${accountName}/locations?readMask=name,title`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    const locations = await locationsRes.json();
+
+    // Si un locationId est spécifié, récupérer ses avis
+    if (locationId) {
+      const reviewsRes = await fetch(`https://mybusiness.googleapis.com/v4/${locationId}/reviews`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      const reviewsData = await reviewsRes.json();
+      return res.json({ reviews: reviewsData.reviews || [], locations: locations.locations || [] });
+    }
+
+    res.json({ reviews: [], locations: locations.locations || [], accounts: accounts.accounts });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la récupération des avis' });
+  }
+});
+
+// ============ STRIPE WEBHOOK ============
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -84,6 +234,7 @@ app.post('/webhook', async (req, res) => {
   res.json({ received: true });
 });
 
+// ============ GÉNÉRATION IA ============
 app.post('/generate', async (req, res) => {
   const { review, businessName, businessType, stars, tone, customInstructions, language } = req.body;
   if (!review || !businessName) {
